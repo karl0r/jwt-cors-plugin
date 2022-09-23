@@ -1,4 +1,4 @@
-package traefik_cors_plugin
+package traefik_jwt_cors_plugin
 
 import (
 	"bytes"
