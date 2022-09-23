@@ -1,4 +1,4 @@
-package traefik_jwt_plugin
+package traefik_cors_plugin
 
 import (
 	"bytes"
@@ -29,16 +29,17 @@ import (
 
 // Config the plugin configuration.
 type Config struct {
-	OpaUrl        string
-	OpaAllowField string
-	PayloadFields []string
-	Required      bool
-	Keys          []string
-	Alg           string
-	Iss           string
-	Aud           string
-	OpaHeaders    map[string]string
-	JwtHeaders    map[string]string
+	OpaUrl             string
+	OpaAllowField      string
+	PayloadFields      []string
+	Required           bool
+	Keys               []string
+	UnprotectedMethods []string
+	Alg                string
+	Iss                string
+	Aud                string
+	OpaHeaders         map[string]string
+	JwtHeaders         map[string]string
 }
 
 // CreateConfig creates a new OPA Config
@@ -50,18 +51,19 @@ func CreateConfig() *Config {
 
 // JwtPlugin contains the runtime config
 type JwtPlugin struct {
-	next          http.Handler
-	opaUrl        string
-	opaAllowField string
-	payloadFields []string
-	required      bool
-	jwkEndpoints  []*url.URL
-	keys          map[string]interface{}
-	alg           string
-	iss           string
-	aud           string
-	opaHeaders    map[string]string
-	jwtHeaders    map[string]string
+	next               http.Handler
+	opaUrl             string
+	opaAllowField      string
+	payloadFields      []string
+	required           bool
+	jwkEndpoints       []*url.URL
+	keys               map[string]interface{}
+	alg                string
+	iss                string
+	aud                string
+	opaHeaders         map[string]string
+	jwtHeaders         map[string]string
+	unprotectedMethods []string
 }
 
 // LogEvent contains a single log entry
@@ -154,17 +156,18 @@ type Response struct {
 // New creates a new plugin
 func New(_ context.Context, next http.Handler, config *Config, _ string) (http.Handler, error) {
 	jwtPlugin := &JwtPlugin{
-		next:          next,
-		opaUrl:        config.OpaUrl,
-		opaAllowField: config.OpaAllowField,
-		payloadFields: config.PayloadFields,
-		required:      config.Required,
-		alg:           config.Alg,
-		iss:           config.Iss,
-		aud:           config.Aud,
-		keys:          make(map[string]interface{}),
-		jwtHeaders:    config.JwtHeaders,
-		opaHeaders:    config.OpaHeaders,
+		next:               next,
+		opaUrl:             config.OpaUrl,
+		opaAllowField:      config.OpaAllowField,
+		payloadFields:      config.PayloadFields,
+		required:           config.Required,
+		alg:                config.Alg,
+		iss:                config.Iss,
+		aud:                config.Aud,
+		keys:               make(map[string]interface{}),
+		unprotectedMethods: config.UnprotectedMethods,
+		jwtHeaders:         config.JwtHeaders,
+		opaHeaders:         config.OpaHeaders,
 	}
 	if err := jwtPlugin.ParseKeys(config.Keys); err != nil {
 		return nil, err
@@ -316,6 +319,26 @@ func (jwtPlugin *JwtPlugin) FetchKeys() {
 }
 
 func (jwtPlugin *JwtPlugin) ServeHTTP(rw http.ResponseWriter, request *http.Request) {
+	// Force CORS preflight support
+	if request.Method == "OPTIONS" {
+		// remove auth header if unprotected
+		request.Header.Del("Authorization")
+		// go to next service
+		jwtPlugin.next.ServeHTTP(rw, request)
+		return
+	}
+
+	// check to see if the incoming request uses an allowed method
+	for _, m := range jwtPlugin.unprotectedMethods {
+		if m == request.Method {
+			// remove auth header if unprotected
+			request.Header.Del("Authorization")
+			// go to next service
+			jwtPlugin.next.ServeHTTP(rw, request)
+			return
+		}
+	}
+
 	if err := jwtPlugin.CheckToken(request); err != nil {
 		http.Error(rw, err.Error(), http.StatusForbidden)
 		return
