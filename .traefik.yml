@@ -1,4 +1,4 @@
-displayName: JWT Access Policy
+displayName: JWT Access Policy - CORS support
 type: middleware
 
 import: github.com/karl0r/jwt-cors-plugin
